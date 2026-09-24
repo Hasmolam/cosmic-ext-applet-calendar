@@ -59,6 +59,15 @@ pub fn covered_dates(event: &CalendarEvent) -> Vec<Date> {
         {
             end_date = prev;
         }
+    } else if event.end.time() == jiff::civil::time(0, 0, 0, 0) && event.end > event.start {
+        // Timed event ending exactly at midnight (00:00:00) of the subsequent day.
+        // Under RFC 5545 and calendar UX, midnight marks the end of the prior day,
+        // so it must not spill over to the subsequent date.
+        if end_date > start_date
+            && let Ok(prev) = end_date.checked_sub(1.days())
+        {
+            end_date = prev;
+        }
     }
 
     let mut dates = Vec::new();
@@ -201,5 +210,39 @@ mod tests {
 
         let dates = covered_dates(&event);
         assert_eq!(dates, vec![date(2026, 3, 5)]);
+    }
+
+    #[test]
+    fn test_midnight_ending_event_does_not_spill_over() {
+        use jiff::civil::time;
+        let tz = jiff::tz::TimeZone::UTC;
+        let start = date(2026, 6, 20)
+            .to_zoned(tz.clone())
+            .unwrap()
+            .with()
+            .time(time(23, 0, 0, 0))
+            .build()
+            .unwrap();
+        let end = date(2026, 6, 21)
+            .to_zoned(tz)
+            .unwrap()
+            .with()
+            .time(time(0, 0, 0, 0))
+            .build()
+            .unwrap();
+
+        let event = CalendarEvent {
+            id: "midnight-test".to_string(),
+            summary: "Late Night Sync".to_string(),
+            start,
+            end,
+            is_all_day: false,
+            location: None,
+            url: None,
+        };
+
+        let dates = covered_dates(&event);
+        // Must strictly cover only June 20, NOT June 21
+        assert_eq!(dates, vec![date(2026, 6, 20)]);
     }
 }

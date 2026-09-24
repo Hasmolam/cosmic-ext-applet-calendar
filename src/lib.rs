@@ -8,10 +8,20 @@ mod localize;
 mod time;
 mod window;
 
-use window::Window;
+pub use window::{AppletModeTrait, StandaloneCalendar, TimeReplacement, Window};
 
 pub fn run() -> cosmic::iced::Result {
+    run_standalone()
+}
+
+pub fn run_standalone() -> cosmic::iced::Result {
     localize::localize();
 
-    cosmic::applet::run::<Window>(())
+    cosmic::applet::run::<Window<StandaloneCalendar>>(())
+}
+
+pub fn run_time_replacement() -> cosmic::iced::Result {
+    localize::localize();
+
+    cosmic::applet::run::<Window<TimeReplacement>>(())
 }

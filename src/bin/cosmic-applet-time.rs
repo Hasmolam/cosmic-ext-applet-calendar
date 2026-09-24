@@ -9,5 +9,5 @@ fn main() -> cosmic::iced::Result {
 
     tracing::info!("Starting cosmic-applet-time compatibility binary with version {VERSION}");
 
-    cosmic_ext_applet_calendar::run()
+    cosmic_ext_applet_calendar::run_time_replacement()
 }

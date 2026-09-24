@@ -45,7 +45,10 @@ Downloads the prebuilt binary and installs it to `~/.local/bin/`:
 curl -fsSL https://raw.githubusercontent.com/Hasmolam/cosmic-ext-applet-calendar/main/install.sh | bash
 ```
 
-This installs `cosmic-ext-applet-calendar`, registers the applet in COSMIC Settings, and provides the `cosmic-applet-time` drop-in binary.
+To also replace your top bar's digital clock:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Hasmolam/cosmic-ext-applet-calendar/main/install.sh | bash -s -- --replace-clock
+```
 
 ### Method 2: Build with Just (Standard System Install)
 
@@ -58,7 +61,7 @@ just build
 sudo just install
 ```
 
-### Method 3: Build with Cargo
+### Method 3: Build from Source with Cargo
 
 ```bash
 git clone https://github.com/Hasmolam/cosmic-ext-applet-calendar.git
@@ -71,12 +74,13 @@ cargo build --release
 
 ## Usage Modes
 
-This applet supports two modes:
+This applet natively supports two distinct operational modes:
 
-1. **Standalone Panel Applet:**
-   Go to **Settings → Desktop → Panel → Applets**. You will find **Calendar & Agenda** in the available applets list. Add it anywhere on your top bar or dock.
+1. **Standalone Panel Applet (Default):**
+   Displays a calendar icon with today's day of the month (e.g. `📅 24`) in your panel or dock.
+   Go to **Settings → Desktop → Panel → Applets**, search for **Calendar & Agenda**, and add it anywhere.
 2. **Drop-in Clock Replacement:**
-   The installer automatically places `cosmic-applet-time` in `~/.local/bin/`. Clicking the default clock in your top bar opens the enhanced calendar and agenda popup.
+   Replaces the default COSMIC digital clock (`cosmic-applet-time`) on your top bar, retaining standard time formatting while opening the calendar and agenda on click. Enabled via `./install.sh --replace-clock`.
 
 ---
 

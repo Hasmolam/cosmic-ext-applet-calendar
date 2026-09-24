@@ -1,6 +1,6 @@
 # Maintainer: Hasan Hüseyin Yolcu <hasanhuseyinyolcu25@gmail.com>
 pkgname=cosmic-ext-applet-calendar-git
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Standalone calendar and agenda applet for the COSMIC Desktop"
 arch=('x86_64' 'aarch64')

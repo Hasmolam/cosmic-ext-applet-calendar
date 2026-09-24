@@ -19,9 +19,24 @@ ICON_FILE="${HOME}/.local/share/icons/hicolor/scalable/apps/io.github.hasmolam.c
 
 echo -e "${BLUE}${BOLD}=== COSMIC Calendar Applet Uninstaller ===${NC}\n"
 
+# 1. Terminate running instances
+echo -e "${BLUE}[*] Stopping running applet instances...${NC}"
+killall cosmic-ext-applet-calendar 2>/dev/null || true
+killall cosmic-applet-time 2>/dev/null || true
+
+# 2. Remove installed binaries and desktop/icon files
 rm -f "${TARGET_BIN}" "${TIME_COMPAT_BIN}" "${DESKTOP_FILE}" "${ICON_FILE}"
 
-echo -e "${BLUE}[*] Restarting cosmic-panel to restore default system clock...${NC}"
+# 3. Refresh desktop and icon database caches
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+fi
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+fi
+
+# 4. Restart panel to clean up applet slots
+echo -e "${BLUE}[*] Restarting cosmic-panel...${NC}"
 killall cosmic-panel 2>/dev/null || true
 
-echo -e "${GREEN}${BOLD}✓ Success!${NC} Uninstalled cosmic-ext-applet-calendar and restored default system applet."
+echo -e "${GREEN}${BOLD}✓ Success!${NC} Uninstalled cosmic-ext-applet-calendar and restored default system configuration.\n"

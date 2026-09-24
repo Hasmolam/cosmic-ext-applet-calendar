@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-ext-applet-calendar"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "COSMIC desktop calendar applet with Google Calendar, CalDAV sync, and agenda view"
@@ -21,12 +21,12 @@ name = "cosmic-applet-time"
 path = "src/bin/cosmic-applet-time.rs"
 
 [dependencies]
-cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic", rev = "08a09e3d" }
 icu = { version = "2.1.1", features = ["compiled_data"] }
 i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10"
 jiff = "0.2"
-libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, features = [
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "08a09e3d", default-features = false, features = [
     "applet",
     "applet-token",
     "dbus-config",

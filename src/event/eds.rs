@@ -34,16 +34,46 @@ pub trait CalendarSubprocess {
 }
 
 /// Builds the S-Expression query string required by Evolution Data Server.
-/// Example format: (occur-in-time-range? (make-time "20260401T000000Z") (make-time "20260430T235959Z"))
+/// Converts the local date boundaries into true UTC timestamps to avoid missing
+/// events in non-UTC time zones.
+/// Example format: (occur-in-time-range? (make-time "20260331T210000Z") (make-time "20260430T205959Z"))
 pub fn make_time_range_sexp(start: Date, end: Date) -> String {
+    let tz = jiff::tz::TimeZone::system();
+    make_time_range_sexp_tz(start, end, &tz)
+}
+
+pub fn make_time_range_sexp_tz(start: Date, end: Date, tz: &jiff::tz::TimeZone) -> String {
+    use jiff::civil::time;
+
+    let start_utc = start
+        .to_zoned(tz.clone())
+        .and_then(|z| z.with().time(time(0, 0, 0, 0)).build())
+        .map(|z| z.with_time_zone(jiff::tz::TimeZone::UTC))
+        .unwrap_or_else(|_| start.to_zoned(jiff::tz::TimeZone::UTC).unwrap());
+
+    let end_utc = end
+        .to_zoned(tz.clone())
+        .and_then(|z| z.with().time(time(23, 59, 59, 0)).build())
+        .map(|z| z.with_time_zone(jiff::tz::TimeZone::UTC))
+        .unwrap_or_else(|_| end.to_zoned(jiff::tz::TimeZone::UTC).unwrap());
+
+    let s_dt = start_utc.datetime();
+    let e_dt = end_utc.datetime();
+
     format!(
-        "(occur-in-time-range? (make-time \"{:04}{:02}{:02}T000000Z\") (make-time \"{:04}{:02}{:02}T235959Z\"))",
-        start.year(),
-        start.month(),
-        start.day(),
-        end.year(),
-        end.month(),
-        end.day()
+        "(occur-in-time-range? (make-time \"{:04}{:02}{:02}T{:02}{:02}{:02}Z\") (make-time \"{:04}{:02}{:02}T{:02}{:02}{:02}Z\"))",
+        s_dt.year(),
+        s_dt.month(),
+        s_dt.day(),
+        s_dt.hour(),
+        s_dt.minute(),
+        s_dt.second(),
+        e_dt.year(),
+        e_dt.month(),
+        e_dt.day(),
+        e_dt.hour(),
+        e_dt.minute(),
+        e_dt.second(),
     )
 }
 
@@ -183,56 +213,66 @@ impl CalendarBackend for EdsBackend {
         end: Date,
     ) -> BoxFuture<'a, Result<Vec<CalendarEvent>, CalendarError>> {
         Box::pin(async move {
-            let timeout_duration = Duration::from_secs(3);
-
-            let fetch_work = async {
-                let conn = match zbus::Connection::session().await {
-                    Ok(c) => c,
-                    Err(err) => {
-                        tracing::debug!(?err, "No D-Bus session bus available for EDS");
-                        return Ok(Vec::new());
-                    }
-                };
-
-                let (factory, _bus_name) = match find_calendar_factory(&conn).await {
-                    Some(f) => f,
-                    None => {
-                        tracing::debug!(
-                            "Evolution Data Server CalendarFactory is not available on D-Bus"
-                        );
-                        return Ok(Vec::new());
-                    }
-                };
-
-                let uids = discover_calendar_uids(&conn).await;
-                if uids.is_empty() {
-                    tracing::debug!("No active calendar sources found in EDS");
+            let conn = match zbus::Connection::session().await {
+                Ok(c) => c,
+                Err(err) => {
+                    tracing::debug!(?err, "No D-Bus session bus available for EDS");
                     return Ok(Vec::new());
                 }
+            };
 
-                let sexp = make_time_range_sexp(start, end);
-                let mut all_events = Vec::new();
+            let (factory, _bus_name) = match find_calendar_factory(&conn).await {
+                Some(f) => f,
+                None => {
+                    tracing::debug!(
+                        "Evolution Data Server CalendarFactory is not available on D-Bus"
+                    );
+                    return Ok(Vec::new());
+                }
+            };
 
-                for uid in uids {
-                    match fetch_calendar_events(&conn, &factory, &uid, &sexp, start, end).await {
-                        Ok(events) => all_events.extend(events),
-                        Err(err) => {
+            let uids = discover_calendar_uids(&conn).await;
+            if uids.is_empty() {
+                tracing::debug!("No active calendar sources found in EDS");
+                return Ok(Vec::new());
+            }
+
+            let sexp = make_time_range_sexp(start, end);
+
+            // Concurrently query each calendar with an independent 2.5-second timeout.
+            // This prevents a single unresponsive calendar/CalDAV server from blocking
+            // or cancelling the other calendars.
+            let tasks = uids.into_iter().map(|uid| {
+                let conn_ref = &conn;
+                let factory_ref = &factory;
+                let sexp_ref = &sexp;
+                async move {
+                    let per_cal_timeout = Duration::from_millis(2500);
+                    match tokio::time::timeout(
+                        per_cal_timeout,
+                        fetch_calendar_events(conn_ref, factory_ref, &uid, sexp_ref, start, end),
+                    )
+                    .await
+                    {
+                        Ok(Ok(events)) => events,
+                        Ok(Err(err)) => {
                             tracing::warn!(?err, uid = %uid, "Failed to fetch events from EDS calendar");
+                            Vec::new()
+                        }
+                        Err(_) => {
+                            tracing::warn!(uid = %uid, "EDS calendar fetch timed out after 2.5s");
+                            Vec::new()
                         }
                     }
                 }
+            });
 
-                all_events.sort_by(|a, b| a.start.cmp(&b.start));
-                Ok(all_events)
-            };
+            let calendar_results = cosmic::iced::futures::future::join_all(tasks).await;
+            let mut all_events: Vec<CalendarEvent> =
+                calendar_results.into_iter().flatten().collect();
 
-            match tokio::time::timeout(timeout_duration, fetch_work).await {
-                Ok(result) => result,
-                Err(_) => {
-                    tracing::warn!("EDS event fetching timed out after 3 seconds");
-                    Ok(Vec::new())
-                }
-            }
+            all_events.sort_by(|a, b| a.start.cmp(&b.start));
+            Ok(all_events)
         })
     }
 }
@@ -241,13 +281,36 @@ impl CalendarBackend for EdsBackend {
 mod tests {
     use super::*;
     use jiff::civil::date;
+    use jiff::tz::{Offset, TimeZone};
 
     #[test]
-    fn test_make_time_range_sexp() {
-        let sexp = make_time_range_sexp(date(2026, 4, 1), date(2026, 4, 30));
+    fn test_make_time_range_sexp_utc() {
+        let sexp = make_time_range_sexp_tz(date(2026, 4, 1), date(2026, 4, 30), &TimeZone::UTC);
         assert_eq!(
             sexp,
             "(occur-in-time-range? (make-time \"20260401T000000Z\") (make-time \"20260430T235959Z\"))"
+        );
+    }
+
+    #[test]
+    fn test_make_time_range_sexp_with_positive_tz_offset() {
+        // UTC+3 (e.g. Istanbul/Moscow): 2026-04-01 00:00:00 local is 2026-03-31 21:00:00 UTC
+        let tz = TimeZone::fixed(Offset::from_hours(3).unwrap());
+        let sexp = make_time_range_sexp_tz(date(2026, 4, 1), date(2026, 4, 30), &tz);
+        assert_eq!(
+            sexp,
+            "(occur-in-time-range? (make-time \"20260331T210000Z\") (make-time \"20260430T205959Z\"))"
+        );
+    }
+
+    #[test]
+    fn test_make_time_range_sexp_with_negative_tz_offset() {
+        // UTC-4 (e.g. New York EDT): 2026-04-30 23:59:59 local is 2026-05-01 03:59:59 UTC
+        let tz = TimeZone::fixed(Offset::from_hours(-4).unwrap());
+        let sexp = make_time_range_sexp_tz(date(2026, 4, 1), date(2026, 4, 30), &tz);
+        assert_eq!(
+            sexp,
+            "(occur-in-time-range? (make-time \"20260401T040000Z\") (make-time \"20260501T035959Z\"))"
         );
     }
 

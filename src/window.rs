@@ -78,7 +78,28 @@ fn get_system_locale() -> Locale {
     Locale::try_from_str("en-US").expect("Failed to parse fallback locale 'en-US'")
 }
 
-pub struct Window {
+pub trait AppletModeTrait: 'static + Send + Sync + Default {
+    const APP_ID: &'static str;
+    const IS_STANDALONE: bool;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StandaloneCalendar;
+
+impl AppletModeTrait for StandaloneCalendar {
+    const APP_ID: &'static str = "io.github.hasmolam.cosmic-ext-applet-calendar";
+    const IS_STANDALONE: bool = true;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TimeReplacement;
+
+impl AppletModeTrait for TimeReplacement {
+    const APP_ID: &'static str = "com.system76.CosmicAppletTime";
+    const IS_STANDALONE: bool = false;
+}
+
+pub struct Window<M: AppletModeTrait = StandaloneCalendar> {
     core: cosmic::app::Core,
     popup: Option<window::Id>,
     now: Zoned,
@@ -97,6 +118,7 @@ pub struct Window {
     month_events: Vec<crate::event::CalendarEvent>,
     month_event_dates: std::collections::HashSet<Date>,
     selected_date_events: Vec<crate::event::CalendarEvent>,
+    _mode: std::marker::PhantomData<M>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +141,7 @@ pub enum Message {
     EventsLoaded(Date, Result<Vec<crate::event::CalendarEvent>, String>),
 }
 
-impl Window {
+impl<M: AppletModeTrait> Window<M> {
     fn create_datetime(&self, date: &Date) -> DateTime<icu::calendar::Gregorian> {
         DateTime {
             date: IcuDate::try_new_gregorian(
@@ -388,7 +410,10 @@ impl Window {
             let color_strip = rule::vertical(3);
 
             let details = column![
-                text::body(summary).size(13),
+                text::body(summary)
+                    .size(13)
+                    .wrapping(cosmic::iced::widget::text::Wrapping::Word)
+                    .width(Length::Fill),
                 text::caption(time_str).size(11),
             ]
             .spacing(2)
@@ -402,12 +427,16 @@ impl Window {
                 && crate::event::is_safe_web_url(url)
             {
                 let url_clone = url.clone();
-                event_row = event_row.push(
-                    button::icon(icon::from_name("link-symbolic"))
-                        .on_press(Message::OpenUrl(url_clone))
-                        .padding(4)
-                        .class(cosmic::theme::Button::Text),
-                );
+                let link_btn = button::icon(icon::from_name("link-symbolic"))
+                    .on_press(Message::OpenUrl(url_clone))
+                    .padding(4)
+                    .class(cosmic::theme::Button::Text);
+
+                event_row = event_row.push(cosmic::widget::tooltip(
+                    link_btn,
+                    text::caption(fl!("open-meeting-link")),
+                    cosmic::widget::tooltip::Position::Top,
+                ));
             }
 
             events_col = events_col.push(container(event_row).padding(space_xs));
@@ -477,11 +506,11 @@ impl Window {
     }
 }
 
-impl cosmic::Application for Window {
+impl<M: AppletModeTrait> cosmic::Application for Window<M> {
     type Message = Message;
     type Executor = cosmic::SingleThreadExecutor;
     type Flags = ();
-    const APP_ID: &str = "com.system76.CosmicAppletTime";
+    const APP_ID: &str = M::APP_ID;
 
     fn init(core: app::Core, _flags: Self::Flags) -> (Self, app::Task<Self::Message>) {
         let locale = get_system_locale();
@@ -524,6 +553,7 @@ impl cosmic::Application for Window {
             month_events: Vec::new(),
             month_event_dates: std::collections::HashSet::new(),
             selected_date_events: Vec::new(),
+            _mode: std::marker::PhantomData,
         };
 
         // Zero Idle IPC: do not initiate background fetches until the popup is opened
@@ -822,7 +852,10 @@ impl cosmic::Application for Window {
                             exec,
                         });
                     } else {
-                        tracing::error!("Wayland tx is None");
+                        tracing::warn!("Wayland token_tx is None; spawning xdg-open directly");
+                        let _ = std::process::Command::new("xdg-open")
+                            .arg(&safe_url)
+                            .spawn();
                     }
                 }
                 Task::none()
@@ -835,7 +868,10 @@ impl cosmic::Application for Window {
                         exec,
                     });
                 } else {
-                    tracing::error!("Wayland tx is None");
+                    tracing::warn!("Wayland token_tx is None; spawning cosmic-settings directly");
+                    let _ = std::process::Command::new("cosmic-settings")
+                        .arg("time")
+                        .spawn();
                 }
                 Task::none()
             }
@@ -935,18 +971,37 @@ impl cosmic::Application for Window {
             PanelAnchor::Top | PanelAnchor::Bottom
         );
 
-        let button = button::custom(if horizontal {
+        let content: Element<'_, Message> = if M::IS_STANDALONE {
+            let Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
+            let day_str = self.now.date().day().to_string();
+            let icon_widget =
+                icon::from_name("io.github.hasmolam.cosmic-ext-applet-calendar-symbolic").size(16);
+            let day_text = text(day_str);
+            if horizontal {
+                row![icon_widget, day_text]
+                    .spacing(space_xxs)
+                    .align_y(Alignment::Center)
+                    .into()
+            } else {
+                column![icon_widget, day_text]
+                    .spacing(space_xxs)
+                    .align_x(Alignment::Center)
+                    .into()
+            }
+        } else if horizontal {
             self.horizontal_layout()
         } else {
             self.vertical_layout()
-        })
-        .padding(if horizontal {
-            [0, self.core.applet.suggested_padding(true).0]
-        } else {
-            [self.core.applet.suggested_padding(true).0, 0]
-        })
-        .on_press_down(Message::TogglePopup)
-        .class(cosmic::theme::Button::AppletIcon);
+        };
+
+        let button = button::custom(content)
+            .padding(if horizontal {
+                [0, self.core.applet.suggested_padding(true).0]
+            } else {
+                [self.core.applet.suggested_padding(true).0, 0]
+            })
+            .on_press_down(Message::TogglePopup)
+            .class(cosmic::theme::Button::AppletIcon);
 
         autosize::autosize(
             if let Some(tracker) = self.rectangle_tracker.as_ref() {
