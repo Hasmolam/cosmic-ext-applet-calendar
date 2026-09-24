@@ -1,0 +1,6 @@
+datetime-settings = Date, Time and Calendar Settings...
+no-events-scheduled = No scheduled events
+all-day = All day
+untitled-event = (Untitled event)
+open-meeting-link = Join Meeting
+loading-events = Loading events...

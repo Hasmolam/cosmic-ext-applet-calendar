@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Calendar & Agenda
+Comment=COSMIC calendar applet with Google Calendar, CalDAV, and agenda view
+Type=Application
+Exec=cosmic-ext-applet-calendar
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Calendar;Agenda;Events;Date;Time;
+Icon=io.github.hasmolam.cosmic-ext-applet-calendar-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicShrinkable=true
+X-HostWaylandDisplay=true
+X-CosmicHoverPopup=Auto

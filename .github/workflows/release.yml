@@ -1,0 +1,59 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release Binaries
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libudev-dev pkg-config
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Strip binaries
+        run: |
+          strip target/release/cosmic-ext-applet-calendar
+          strip target/release/cosmic-applet-time
+
+      - name: Package Release
+        run: |
+          mkdir -p release-pkg
+          cp target/release/cosmic-ext-applet-calendar release-pkg/
+          cp target/release/cosmic-applet-time release-pkg/
+          cp install.sh release-pkg/
+          cp uninstall.sh release-pkg/
+          cp README.md release-pkg/
+          cp -r data release-pkg/
+          tar -czvf cosmic-ext-applet-calendar-x86_64-linux.tar.gz -C release-pkg .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/cosmic-ext-applet-calendar
+            target/release/cosmic-applet-time
+            cosmic-ext-applet-calendar-x86_64-linux.tar.gz
+            install.sh
+            uninstall.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

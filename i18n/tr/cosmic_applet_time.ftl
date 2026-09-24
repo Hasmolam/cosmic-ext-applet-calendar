@@ -1,0 +1,6 @@
+datetime-settings = Tarih, Saat ve Takvim Ayarları...
+no-events-scheduled = Planlanmış etkinlik bulunmuyor
+all-day = Tüm gün
+untitled-event = (İsimsiz etkinlik)
+open-meeting-link = Toplantıya Katıl
+loading-events = Etkinlikler yükleniyor...

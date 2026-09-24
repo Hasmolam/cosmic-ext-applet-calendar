@@ -1,0 +1,57 @@
+[package]
+name = "cosmic-ext-applet-calendar"
+version = "1.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "COSMIC desktop calendar applet with Google Calendar, CalDAV sync, and agenda view"
+authors = ["Hasan Hüseyin Yolcu <hasanhuseyinyolcu25@gmail.com>"]
+repository = "https://github.com/Hasmolam/cosmic-ext-applet-calendar"
+homepage = "https://github.com/Hasmolam/cosmic-ext-applet-calendar"
+
+[lib]
+name = "cosmic_ext_applet_calendar"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cosmic-ext-applet-calendar"
+path = "src/main.rs"
+
+[[bin]]
+name = "cosmic-applet-time"
+path = "src/bin/cosmic-applet-time.rs"
+
+[dependencies]
+cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
+icu = { version = "2.1.1", features = ["compiled_data"] }
+i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+jiff = "0.2"
+libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, features = [
+    "applet",
+    "applet-token",
+    "dbus-config",
+    "multi-window",
+    "tokio",
+    "wayland",
+    "desktop-systemd-scope",
+    "winit",
+] }
+logind-zbus = "5.3.2"
+rust-embed = "8.11.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+timedate-zbus = { git = "https://github.com/pop-os/dbus-settings-bindings" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-log = "0.2.0"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+url = "2.5"
+zbus = { version = "5.14.0", default-features = false, features = ["tokio"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+opt-level = 3
+codegen-units = 1
