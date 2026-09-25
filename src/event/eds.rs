@@ -339,9 +339,15 @@ mod tests {
             .fetch_events(date(2026, 9, 1), date(2026, 9, 30))
             .await
         {
-            println!("Fetched {} events from EDS for September 2026", events.len());
+            println!(
+                "Fetched {} events from EDS for September 2026",
+                events.len()
+            );
             for ev in &events {
-                println!("  - {} (all_day={}) on {:?}", ev.summary, ev.is_all_day, ev.start);
+                println!(
+                    "  - {} (all_day={}) on {:?}",
+                    ev.summary, ev.is_all_day, ev.start
+                );
             }
         }
     }
