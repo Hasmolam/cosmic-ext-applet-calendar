@@ -77,10 +77,43 @@ cargo build --release
 This applet natively supports two distinct operational modes:
 
 1. **Standalone Panel Applet (Default):**
-   Displays a calendar icon with today's day of the month (e.g. `📅 24`) in your panel or dock.
+   Displays a calendar icon with today's day of the month in your panel or dock.
    Go to **Settings → Desktop → Panel → Applets**, search for **Calendar & Agenda**, and add it anywhere.
 2. **Drop-in Clock Replacement:**
    Replaces the default COSMIC digital clock (`cosmic-applet-time`) on your top bar, retaining standard time formatting while opening the calendar and agenda on click. Enabled via `./install.sh --replace-clock`.
+
+---
+
+## Configuring Calendars
+
+The applet reads from Evolution Data Server (EDS) over D-Bus and from local `.ics` files. It does not communicate directly with proprietary cloud APIs, meaning any service supported by EDS works out of the box.
+
+### 1. Cloud Calendars (Google, Nextcloud, CalDAV)
+
+COSMIC Settings (`cosmic-settings`) does not currently include a native Online Accounts configuration panel. On Pop!_OS and Ubuntu-based COSMIC systems, configure your accounts through GNOME Online Accounts.
+
+Because GNOME Control Center restricts execution outside GNOME/Unity sessions, launch the Online Accounts panel with the `XDG_CURRENT_DESKTOP` override:
+
+```bash
+env XDG_CURRENT_DESKTOP=GNOME gnome-control-center online-accounts
+```
+
+1. Select **Google**, **Nextcloud**, or **WebDAV (CalDAV)**.
+2. Sign in and verify that the **Calendar** toggle is enabled.
+3. Evolution Data Server will synchronize events in the background. The applet discovers new calendars on its next popover open.
+
+On non-GNOME distributions (e.g. Arch Linux, Fedora Minimal), you can configure accounts using the Evolution mail client GUI (`evolution` -> Edit -> Preferences -> Calendars) or any EDS-compatible setup tool.
+
+### 2. Local `.ics` Files (Offline)
+
+If you do not want cloud synchronization, copy any standard iCalendar (`.ics`) file into:
+
+```bash
+mkdir -p ~/.local/share/calendars
+cp your-calendar.ics ~/.local/share/calendars/
+```
+
+The applet also scans `~/.local/share/cosmic-calendar/` and `/usr/share/calendar/` for system holidays.
 
 ---
 

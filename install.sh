@@ -206,5 +206,7 @@ if [[ "${INSTALLED}" -eq 1 ]]; then
     else
         echo -e "  - System clock untouched. (To replace clock, re-run with --replace-clock)"
     fi
+    echo -e "  - Accounts: To sync Google/CalDAV calendars, run:"
+    echo -e "      env XDG_CURRENT_DESKTOP=GNOME gnome-control-center online-accounts"
     echo -e "  - To revert anytime, run: ./uninstall.sh\n"
 fi
