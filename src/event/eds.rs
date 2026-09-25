@@ -30,6 +30,8 @@ pub trait CalendarFactory {
 
 #[proxy(interface = "org.gnome.evolution.dataserver.Calendar")]
 pub trait CalendarSubprocess {
+    fn open(&self) -> zbus::Result<Vec<String>>;
+    fn refresh(&self) -> zbus::Result<()>;
     fn get_object_list(&self, sexp: &str) -> zbus::Result<Vec<String>>;
 }
 
@@ -178,6 +180,12 @@ async fn fetch_calendar_events(
         .build()
         .await?;
 
+    // Backend must be opened before querying objects, otherwise EDS returns
+    // "Backend is not opened yet" error.
+    let _ = sub_proxy.open().await;
+    // Trigger background refresh from remote CalDAV/Google server
+    let _ = sub_proxy.refresh().await;
+
     let ical_list = sub_proxy.get_object_list(sexp).await?;
 
     let mut events = Vec::new();
@@ -247,7 +255,7 @@ impl CalendarBackend for EdsBackend {
                 let factory_ref = &factory;
                 let sexp_ref = &sexp;
                 async move {
-                    let per_cal_timeout = Duration::from_millis(2500);
+                    let per_cal_timeout = Duration::from_secs(8);
                     match tokio::time::timeout(
                         per_cal_timeout,
                         fetch_calendar_events(conn_ref, factory_ref, &uid, sexp_ref, start, end),
@@ -260,7 +268,7 @@ impl CalendarBackend for EdsBackend {
                             Vec::new()
                         }
                         Err(_) => {
-                            tracing::warn!(uid = %uid, "EDS calendar fetch timed out after 2.5s");
+                            tracing::warn!(uid = %uid, "EDS calendar fetch timed out after 8s");
                             Vec::new()
                         }
                     }
@@ -328,12 +336,12 @@ mod tests {
     async fn test_eds_backend_fetches_real_calendar_events() {
         let backend = EdsBackend::new();
         if let Ok(events) = backend
-            .fetch_events(date(2026, 4, 1), date(2026, 4, 30))
+            .fetch_events(date(2026, 9, 1), date(2026, 9, 30))
             .await
         {
-            println!("Fetched {} events from EDS for April 2026", events.len());
+            println!("Fetched {} events from EDS for September 2026", events.len());
             for ev in &events {
-                println!("  - {} (all_day={})", ev.summary, ev.is_all_day);
+                println!("  - {} (all_day={}) on {:?}", ev.summary, ev.is_all_day, ev.start);
             }
         }
     }
