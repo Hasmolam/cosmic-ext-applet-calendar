@@ -3,13 +3,13 @@
 
 pub mod backend;
 pub mod cache;
-pub mod eds;
 pub mod error;
 pub mod ical;
 
-pub use backend::{CalendarBackend, CompositeBackend, LocalIcsBackend, MockBackend};
+pub use backend::{
+    CalendarBackend, CalendarDbusBackend, CompositeBackend, LocalIcsBackend, MockBackend,
+};
 pub use cache::EventCache;
-pub use eds::EdsBackend;
 pub use error::CalendarError;
 
 use jiff::{ToSpan, Zoned, civil::Date};

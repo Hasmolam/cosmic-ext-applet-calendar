@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=COSMIC Calendar Sync
+Comment=Background calendar synchronization service for COSMIC Desktop
+Icon=x-office-calendar
+Exec=/usr/bin/cosmic-calendar-sync
+Terminal=false
+NoDisplay=true
+X-CosmicAppId=dev.cosmic.Calendar
+Categories=Utility;Core;

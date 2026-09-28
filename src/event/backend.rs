@@ -5,6 +5,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+use calendar_client::CalendarClient;
 use jiff::civil::Date;
 
 use crate::event::{CalendarError, CalendarEvent, ical::parse_ical_content};
@@ -12,13 +13,82 @@ use crate::event::{CalendarError, CalendarEvent, ical::parse_ical_content};
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Pluggable trait for fetching calendar events from various backends
-/// (e.g. Local ICS files, Evolution Data Server, or future COSMIC Accounts).
+/// (e.g. Local ICS files or the COSMIC Calendar D-Bus service).
 pub trait CalendarBackend: Send + Sync {
     fn fetch_events<'a>(
         &'a self,
         start: Date,
         end: Date,
     ) -> BoxFuture<'a, Result<Vec<CalendarEvent>, CalendarError>>;
+}
+
+pub struct CalendarDbusBackend;
+
+impl CalendarDbusBackend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for CalendarDbusBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CalendarBackend for CalendarDbusBackend {
+    fn fetch_events<'a>(
+        &'a self,
+        start: Date,
+        end: Date,
+    ) -> BoxFuture<'a, Result<Vec<CalendarEvent>, CalendarError>> {
+        Box::pin(async move {
+            let client = match CalendarClient::session().await {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::debug!(?error, "Calendar daemon is unavailable");
+                    return Ok(Vec::new());
+                }
+            };
+
+            let start_time = start
+                .to_zoned(jiff::tz::TimeZone::system())
+                .map(|date| date.timestamp().as_second())
+                .unwrap_or_default();
+            let end_time = end
+                .to_zoned(jiff::tz::TimeZone::system())
+                .map(|date| date.timestamp().as_second())
+                .unwrap_or_default();
+
+            let summaries = client.get_events(start_time, end_time).await;
+            let mut events = Vec::new();
+            for summary in summaries {
+                let Ok(event_start) = jiff::Timestamp::new(summary.start_time, 0)
+                    .map(|timestamp| timestamp.to_zoned(jiff::tz::TimeZone::system()))
+                else {
+                    continue;
+                };
+                let Ok(event_end) = jiff::Timestamp::new(summary.end_time, 0)
+                    .map(|timestamp| timestamp.to_zoned(jiff::tz::TimeZone::system()))
+                else {
+                    continue;
+                };
+                events.push(CalendarEvent {
+                    id: format!(
+                        "{}:{}:{}",
+                        summary.collection_id, summary.uid, summary.recurrence_id
+                    ),
+                    summary: summary.summary,
+                    start: event_start,
+                    end: event_end,
+                    is_all_day: summary.is_all_day,
+                    location: None,
+                    url: (!summary.url.is_empty()).then_some(summary.url),
+                });
+            }
+            Ok(events)
+        })
+    }
 }
 
 /// Backend that loads events and public holidays from local `.ics` files
@@ -120,7 +190,7 @@ impl CalendarBackend for LocalIcsBackend {
 }
 
 /// Composite backend that merges events from multiple underlying backends
-/// (e.g. Local ICS + Evolution Data Server).
+/// (e.g. Local ICS + the COSMIC Calendar D-Bus service).
 pub struct CompositeBackend {
     backends: Vec<std::sync::Arc<dyn CalendarBackend>>,
 }

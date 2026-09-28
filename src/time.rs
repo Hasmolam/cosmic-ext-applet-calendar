@@ -8,7 +8,7 @@ use jiff::{
 
 /// Gets the first date that will be visible on the calendar
 pub fn get_calendar_first(year: i16, month: i8, from_weekday: Weekday) -> Date {
-    let date = Date::new(year, month, 1).expect("valid date");
+    let date = Date::new(year, month, 1).unwrap_or(Date::MIN);
     let num_days = date.weekday().since(from_weekday);
-    date.checked_sub(num_days.days()).expect("valid date")
+    date.checked_sub(num_days.days()).unwrap_or(Date::MIN)
 }

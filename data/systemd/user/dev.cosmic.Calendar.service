@@ -1,0 +1,16 @@
+[Unit]
+Description=COSMIC Calendar Synchronization Daemon
+PartOf=graphical-session.target
+After=graphical-session.target
+After=dev.edfloreshz.Accounts.service
+Wants=dev.edfloreshz.Accounts.service
+
+[Service]
+Type=dbus
+BusName=dev.cosmic.Calendar
+ExecStart=%h/.local/bin/cosmic-calendar-sync
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=graphical-session.target

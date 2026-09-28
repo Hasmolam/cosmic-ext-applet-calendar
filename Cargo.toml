@@ -8,6 +8,15 @@ authors = ["Hasan Hüseyin Yolcu <hasanhuseyinyolcu25@gmail.com>"]
 repository = "https://github.com/Hasmolam/cosmic-ext-applet-calendar"
 homepage = "https://github.com/Hasmolam/cosmic-ext-applet-calendar"
 
+[workspace]
+members = [
+    ".",
+    "crates/calendar-client",
+    "crates/calendar-core",
+    "crates/sync-daemon",
+]
+resolver = "2"
+
 [lib]
 name = "cosmic_ext_applet_calendar"
 path = "src/lib.rs"
@@ -21,6 +30,7 @@ name = "cosmic-applet-time"
 path = "src/bin/cosmic-applet-time.rs"
 
 [dependencies]
+calendar-client = { path = "crates/calendar-client" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", rev = "08a09e3d" }
 icu = { version = "2.1.1", features = ["compiled_data"] }
 i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }

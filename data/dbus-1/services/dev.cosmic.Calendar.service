@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=dev.cosmic.Calendar
+Exec=/usr/bin/cosmic-calendar-sync
+SystemdService=dev.cosmic.Calendar.service

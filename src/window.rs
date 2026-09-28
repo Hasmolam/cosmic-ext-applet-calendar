@@ -38,12 +38,13 @@ use cosmic::applet::token::subscription::{
     TokenRequest, TokenUpdate, activation_token_subscription,
 };
 use icu::{
+    calendar::{Gregorian, types::RataDie},
     datetime::{
         DateTimeFormatter, DateTimeFormatterPreferences, fieldsets,
         input::{Date as IcuDate, DateTime, Time},
         options::TimePrecision,
     },
-    locale::{Locale, preferences::extensions::unicode::keywords::HourCycle},
+    locale::{Locale, locale, preferences::extensions::unicode::keywords::HourCycle},
 };
 
 static AUTOSIZE_MAIN_ID: LazyLock<Id> = LazyLock::new(|| Id::new("autosize-main"));
@@ -75,7 +76,19 @@ fn get_system_locale() -> Locale {
         }
     }
     tracing::warn!("No valid locale found in environment, using fallback");
-    Locale::try_from_str("en-US").expect("Failed to parse fallback locale 'en-US'")
+    locale!("en-US")
+}
+
+macro_rules! format_datetime_or_empty {
+    ($preferences:expr, $fields:expr, $datetime:expr) => {{
+        match DateTimeFormatter::try_new($preferences, $fields) {
+            Ok(formatter) => formatter.format(&$datetime).to_string(),
+            Err(error) => {
+                tracing::warn!(?error, "Unable to format calendar date");
+                String::new()
+            }
+        }
+    }};
 }
 
 pub trait AppletModeTrait: 'static + Send + Sync + Default {
@@ -149,14 +162,20 @@ impl<M: AppletModeTrait> Window<M> {
                 date.month() as u8,
                 date.day() as u8,
             )
-            .unwrap(),
+            .unwrap_or_else(|error| {
+                tracing::warn!(?error, "Unable to convert calendar date for display");
+                IcuDate::from_rata_die(RataDie::new(0), Gregorian)
+            }),
             time: Time::try_new(
                 self.now.hour() as u8,
                 self.now.minute() as u8,
                 self.now.second() as u8,
                 0,
             )
-            .unwrap(),
+            .unwrap_or_else(|error| {
+                tracing::warn!(?error, "Unable to convert clock time for display");
+                Time::start_of_day()
+            }),
         }
     }
 
@@ -179,15 +198,20 @@ impl<M: AppletModeTrait> Window<M> {
         );
 
         let prefs = DateTimeFormatterPreferences::from(self.locale.clone());
-        let weekday = DateTimeFormatter::try_new(prefs, fieldsets::E::short()).unwrap();
-
         for i in 0..7 {
-            let date = first_day.checked_add(i.days()).unwrap();
+            let Some(date) = first_day.checked_add(i.days()).ok() else {
+                tracing::warn!(offset = i, "Unable to calculate calendar weekday");
+                continue;
+            };
             let datetime = self.create_datetime(&date);
             calendar = calendar.push(
-                text::caption(weekday.format(&datetime).to_string())
-                    .apply(container)
-                    .center_x(Length::Fixed(44.0)),
+                text::caption(format_datetime_or_empty!(
+                    prefs,
+                    fieldsets::E::short(),
+                    datetime
+                ))
+                .apply(container)
+                .center_x(Length::Fixed(44.0)),
             );
         }
         calendar = calendar.insert_row();
@@ -197,9 +221,10 @@ impl<M: AppletModeTrait> Window<M> {
                 calendar = calendar.insert_row();
             }
 
-            let date = first_day
-                .checked_add(i.days())
-                .expect("valid date in calendar range");
+            let Some(date) = first_day.checked_add(i.days()).ok() else {
+                tracing::warn!(offset = i, "Unable to calculate calendar date");
+                continue;
+            };
             let is_month = date.first_of_month() == self.date_selected.first_of_month();
             let is_day = date == self.date_selected;
             let is_today = date == self.date_today;
@@ -246,10 +271,8 @@ impl<M: AppletModeTrait> Window<M> {
             });
 
             if self.config.show_date_in_top_panel {
-                let formatted_date = DateTimeFormatter::try_new(prefs, fieldsets::MD::medium())
-                    .unwrap()
-                    .format(&datetime)
-                    .to_string();
+                let formatted_date =
+                    format_datetime_or_empty!(prefs, fieldsets::MD::medium(), datetime);
 
                 for p in formatted_date.split_whitespace() {
                     elements.push(self.core.applet.text(p.to_owned()).into());
@@ -264,10 +287,7 @@ impl<M: AppletModeTrait> Window<M> {
             if !self.config.show_seconds {
                 fs = fs.with_time_precision(TimePrecision::Minute);
             }
-            let formatted_time = DateTimeFormatter::try_new(prefs, fs)
-                .unwrap()
-                .format(&datetime)
-                .to_string();
+            let formatted_time = format_datetime_or_empty!(prefs, fs, datetime);
 
             // todo: split using formatToParts when it is implemented
             // https://github.com/unicode-org/icu4x/issues/4936#issuecomment-2128812667
@@ -313,29 +333,20 @@ impl<M: AppletModeTrait> Window<M> {
                     if !self.config.show_seconds {
                         fs = fs.with_time_precision(TimePrecision::Minute);
                     }
-                    DateTimeFormatter::try_new(prefs, fs)
-                        .unwrap()
-                        .format(&datetime)
-                        .to_string()
+                    format_datetime_or_empty!(prefs, fs, datetime)
                 } else {
                     let mut fs = fieldsets::MDT::medium();
                     if !self.config.show_seconds {
                         fs = fs.with_time_precision(TimePrecision::Minute);
                     }
-                    DateTimeFormatter::try_new(prefs, fs)
-                        .unwrap()
-                        .format(&datetime)
-                        .to_string()
+                    format_datetime_or_empty!(prefs, fs, datetime)
                 }
             } else {
                 let mut fs = fieldsets::T::medium();
                 if !self.config.show_seconds {
                     fs = fs.with_time_precision(TimePrecision::Minute);
                 }
-                DateTimeFormatter::try_new(prefs, fs)
-                    .unwrap()
-                    .format(&datetime)
-                    .to_string()
+                format_datetime_or_empty!(prefs, fs, datetime)
             }
         };
 
@@ -527,10 +538,10 @@ impl<M: AppletModeTrait> cosmic::Application for Window<M> {
             } else {
                 let local_backend =
                     std::sync::Arc::new(crate::event::LocalIcsBackend::default_locations());
-                let eds_backend = std::sync::Arc::new(crate::event::EdsBackend::new());
+                let dbus_backend = std::sync::Arc::new(crate::event::CalendarDbusBackend::new());
                 std::sync::Arc::new(crate::event::CompositeBackend::new(vec![
                     local_backend,
-                    eds_backend,
+                    dbus_backend,
                 ]))
             };
 
@@ -747,7 +758,7 @@ impl<M: AppletModeTrait> cosmic::Application for Window<M> {
                                 app.popup = Some(new_id);
 
                                 let mut popup_settings = app.core.applet.get_popup_settings(
-                                    app.core.main_window_id().unwrap(),
+                                    app.core.main_window_id().unwrap_or(new_id),
                                     new_id,
                                     None,
                                     None,
@@ -1022,19 +1033,17 @@ impl<M: AppletModeTrait> cosmic::Application for Window<M> {
         let datetime = self.create_datetime(&self.date_selected);
         let prefs = DateTimeFormatterPreferences::from(self.locale.clone());
 
-        let date = text(
-            DateTimeFormatter::try_new(prefs, fieldsets::YMD::long())
-                .unwrap()
-                .format(&datetime)
-                .to_string(),
-        )
+        let date = text(format_datetime_or_empty!(
+            prefs,
+            fieldsets::YMD::long(),
+            datetime
+        ))
         .size(18);
-        let day_of_week = text::body(
-            DateTimeFormatter::try_new(prefs, fieldsets::E::long())
-                .unwrap()
-                .format(&datetime)
-                .to_string(),
-        );
+        let day_of_week = text::body(format_datetime_or_empty!(
+            prefs,
+            fieldsets::E::long(),
+            datetime
+        ));
 
         let month_controls = row![
             button::icon(icon::from_name("go-previous-symbolic"))

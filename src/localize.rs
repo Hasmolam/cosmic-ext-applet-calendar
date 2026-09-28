@@ -15,9 +15,9 @@ struct Localizations;
 pub static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     let loader: FluentLanguageLoader = fluent_language_loader!();
 
-    loader
-        .load_fallback_language(&Localizations)
-        .expect("Error while loading fallback language");
+    if let Err(error) = loader.load_fallback_language(&Localizations) {
+        eprintln!("Error while loading fallback language: {error}");
+    }
 
     loader
 });
