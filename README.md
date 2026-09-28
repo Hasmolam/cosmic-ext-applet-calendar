@@ -1,159 +1,139 @@
-# COSMIC Calendar Applet (`cosmic-ext-applet-calendar`)
+# COSMIC Calendar Applet & Sync Daemon
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Built for COSMIC](https://img.shields.io/badge/Desktop-COSMIC%20Epoch-orange.svg)](https://github.com/pop-os/cosmic-epoch)
-[![Rust](https://img.shields.io/badge/Rust-2024%20Edition-red.svg)](https://www.rust-lang.org/)
+A calendar and agenda applet with a native Rust background synchronization daemon for the Pop!_OS COSMIC Desktop.
 
-A standalone calendar and agenda applet for the Pop!_OS COSMIC Desktop. Fetches events from Evolution Data Server (Google Calendar, Nextcloud, CalDAV) and local `.ics` files, displaying event dots on the monthly calendar grid and an agenda list for selected days.
-
-Built as an independent applet using `libcosmic`, decoupled from the core `cosmic-applets` monorepo.
+Replaces the legacy Evolution Data Server (EDS) and GNOME Online Accounts (GOA) stack with a pure-Rust CalDAV synchronization engine (`cosmic-calendar-sync`), local SQLite storage with WAL mode, and a lightweight D-Bus client (`calendar-client`).
 
 ---
 
-## Screenshots
+## Architecture Overview
 
-| Event with Meeting Link | Empty State |
-| :---: | :---: |
-| ![Event with Link](screenshots/01_english_event_with_link_june5.png) | ![Empty State](screenshots/02_english_empty_state_june18.png) |
+```text
+cosmic-ext-applet-calendar (libcosmic UI)
+       │
+       ▼
+CompositeBackend
+  ├── LocalIcsBackend (~/.local/share/calendars/*.ics, /usr/share/calendar/*.ics)
+  └── CalendarDbusBackend (via crates/calendar-client)
+             │
+             ▼ D-Bus: dev.cosmic.Calendar (/dev/cosmic/Calendar)
+cosmic-calendar-sync (crates/sync-daemon)
+  ├── Accounts Client (dev.edfloreshz.Accounts over session bus)
+  │     ├── Google OAuth2 (strictly calendar.readonly)
+  │     └── Secret Service (oo7, Nextcloud/CalDAV passwords)
+  ├── CalDAV Sync Engine (RFC 4791, RFC 6578 sync-collection, multiget)
+  ├── SQLite Storage (~/.local/share/cosmic-calendar/calendar.db, WAL, foreign keys)
+  ├── RRULE Expansion & Exception Handling (crates/calendar-core)
+  └── System Listeners (NetworkManager, timedate1, login1 sleep/wake)
+```
 
-| Standard Agenda View | Localization & Real CalDAV Sync |
-| :---: | :---: |
-| ![Standard Event](screenshots/03_english_meeting_june20.png) | ![Turkish i18n & CalDAV](screenshots/04_turkish_i18n_and_eds_real_event.png) |
+### Workspace Crates
+
+| Crate | License | Path | Description |
+|---|---|---|---|
+| `calendar-client` | MPL-2.0 | `crates/calendar-client` | Leaf client library for `dev.cosmic.Calendar` over zbus. Zero network or database dependencies. |
+| `calendar-core` | MPL-2.0 | `crates/calendar-core` | SQLite schema and migrations, iCalendar parser, RRULE virtual instance expansion, meeting link extraction. |
+| `cosmic-calendar-sync` | GPL-3.0-only | `crates/sync-daemon` | Headless daemon managing CalDAV sync, accounts lifecycle, secrets, and system power/network states. |
+| `cosmic-ext-applet-calendar` | GPL-3.0-only | `.` | libcosmic panel applet and drop-in clock replacement. |
 
 ---
 
 ## Features
 
-- **Google Calendar, Nextcloud & CalDAV Sync:** Queries Evolution Data Server (EDS) over D-Bus with zero configuration if your account is signed in via GNOME Online Accounts or Evolution.
-- **Local `.ics` File Support:** Auto-discovers calendar and public holiday `.ics` files in `~/.local/share/calendars/`, `~/.local/share/cosmic-calendar/`, and `/usr/share/calendar/`.
-- **Calendar Event Dots:** Monthly grid shows indicator dots beneath days with scheduled events.
-- **Chronological Agenda:** Selecting a day lists its events sorted by time (all-day events at top) with title, time, and location.
-- **One-Click Meeting Join:** Detects Google Meet, Zoom, and Microsoft Teams URLs and launches them in your default browser.
-- **Battery & Performance Optimization:** Zero background polling or CPU wakeups when the popup is closed. In-memory LRU cache with a 60-second TTL provides instant 0ms month navigation.
-- **Fault-Tolerant Deduplication:** Deduplicates events appearing across multiple calendars or identical recurring instances without dropping distinct meetings at the same hour.
-- **40+ Language Translations:** Built-in localization support via Fluent.
+- **Pure Rust Stack:** Zero runtime dependencies on GNOME, Evolution Data Server, or C libraries.
+- **CalDAV Sync Engine:** Implements RFC 4791 and RFC 6578 incremental collection synchronization with chunked multiget downloads.
+- **Strictly Read-Only Google Scope:** Requests `https://www.googleapis.com/auth/calendar.readonly`, eliminating remote modification risk.
+- **Desktop Consent UI Attribution:** Ships `dev.cosmic.Calendar.desktop` with `X-CosmicAppId` for Wayland-native consent prompts without Polkit elevation.
+- **SQLite WAL Storage:** Events and metadata are indexed locally at `$XDG_DATA_HOME/cosmic-calendar/calendar.db` (directory mode `0700`). Zero network queries during panel popup rendering.
+- **Virtual Instance Expansion:** Expands RRULE recurrences within queried date ranges, supporting `UNTIL`, `COUNT`, `EXDATE`, and detached recurring exceptions.
+- **Meeting Link Detection:** Extracts Google Meet, Zoom, and Microsoft Teams links and opens them via `xdg-open` with Wayland activation token support.
+- **Local `.ics` Support:** Reads standalone `.ics` files from `~/.local/share/calendars/` and system-wide holiday files from `/usr/share/calendar/`.
+- **System Event Listeners:** Automatic resync on network connect and wake from suspend; instant cache invalidation on timezone updates.
+- **Self-Healing Storage:** Automatically archives corrupted databases and initiates clean resynchronization without crash-looping.
+
+---
+
+## Building and Testing
+
+### Prerequisites
+
+- Rust 1.85+ (2024 Edition)
+- `just` command runner
+- System packages: `libsqlite3-dev`, `libdbus-1-dev`
+
+### Compilation and Tests
+
+```bash
+# Run narrow test suites
+cargo test --workspace
+
+# Validate formatting and lints
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+The test suite includes an embedded `wiremock` CalDAV server testing full discovery, RFC 6578 sync, and multiget flows offline without live credentials.
 
 ---
 
 ## Installation
 
-### Method 1: Quick Install (Recommended)
+### Local User Install (Non-Root)
 
-Downloads the prebuilt binary and installs it to `~/.local/bin/`:
+Installs the binaries, user systemd units, D-Bus activation services, and desktop entry to `~/.local`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Hasmolam/cosmic-ext-applet-calendar/main/install.sh | bash
+just install-user
 ```
 
-To also replace your top bar's digital clock:
+Enable and start the user daemon:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Hasmolam/cosmic-ext-applet-calendar/main/install.sh | bash -s -- --replace-clock
+systemctl --user daemon-reload
+systemctl --user enable --now dev.cosmic.Calendar.service
 ```
 
-### Method 2: Build with Just (Standard System Install)
-
-Requires `cargo` and `just`:
+### System-Wide Install (Root)
 
 ```bash
-git clone https://github.com/Hasmolam/cosmic-ext-applet-calendar.git
-cd cosmic-ext-applet-calendar
-just build
 sudo just install
 ```
 
-### Method 3: Build from Source with Cargo
+### Uninstallation
 
 ```bash
-git clone https://github.com/Hasmolam/cosmic-ext-applet-calendar.git
-cd cosmic-ext-applet-calendar
-cargo build --release
-./install.sh
+just uninstall-user
+# or for system-wide:
+sudo just uninstall
 ```
 
 ---
 
-## Usage Modes
+## D-Bus Interface (`dev.cosmic.Calendar`)
 
-This applet natively supports two distinct operational modes:
+Service name: `dev.cosmic.Calendar`  
+Object path: `/dev/cosmic/Calendar`  
+Interface: `dev.cosmic.Calendar`
 
-1. **Standalone Panel Applet (Default):**
-   Displays a calendar icon with today's day of the month in your panel or dock.
-   Go to **Settings → Desktop → Panel → Applets**, search for **Calendar & Agenda**, and add it anywhere.
-2. **Drop-in Clock Replacement:**
-   Replaces the default COSMIC digital clock (`cosmic-applet-time`) on your top bar, retaining standard time formatting while opening the calendar and agenda on click. Enabled via `./install.sh --replace-clock`.
+### Methods
 
----
+- `GetCollections() -> Vec<CalendarCollection>`
+- `SetCollectionVisibility(id: String, visible: bool) -> ()`
+- `GetEvents(start: i64, end: i64) -> Vec<CalendarEventSummary>`
+- `GetEventDetails(col_id: String, uid: String, rec_id: String) -> CalendarEventDetail`
+- `Sync() -> ()`
 
-## Configuring Calendars
+### Signals
 
-The applet reads from Evolution Data Server (EDS) over D-Bus and from local `.ics` files. It does not communicate directly with proprietary cloud APIs, meaning any service supported by EDS works out of the box.
-
-### 1. Cloud Calendars (Google, Nextcloud, CalDAV)
-
-COSMIC Settings (`cosmic-settings`) does not currently include a native Online Accounts configuration panel. On Pop!_OS and Ubuntu-based COSMIC systems, configure your accounts through GNOME Online Accounts.
-
-Because GNOME Control Center restricts execution outside GNOME/Unity sessions, launch the Online Accounts panel with the `XDG_CURRENT_DESKTOP` override:
-
-```bash
-env XDG_CURRENT_DESKTOP=GNOME gnome-control-center online-accounts
-```
-
-1. Select **Google**, **Nextcloud**, or **WebDAV (CalDAV)**.
-2. Sign in and verify that the **Calendar** toggle is enabled.
-3. Evolution Data Server will synchronize events in the background. The applet discovers new calendars on its next popover open.
-
-On non-GNOME distributions (e.g. Arch Linux, Fedora Minimal), you can configure accounts using the Evolution mail client GUI (`evolution` -> Edit -> Preferences -> Calendars) or any EDS-compatible setup tool.
-
-### 2. Local `.ics` Files (Offline)
-
-If you do not want cloud synchronization, copy any standard iCalendar (`.ics`) file into:
-
-```bash
-mkdir -p ~/.local/share/calendars
-cp your-calendar.ics ~/.local/share/calendars/
-```
-
-The applet also scans `~/.local/share/cosmic-calendar/` and `/usr/share/calendar/` for system holidays.
-
----
-
-## Uninstallation
-
-To completely remove the applet and restore the default system clock:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Hasmolam/cosmic-ext-applet-calendar/main/uninstall.sh | bash
-```
-
-Or manually:
-
-```bash
-rm -f ~/.local/bin/cosmic-ext-applet-calendar ~/.local/bin/cosmic-applet-time
-rm -f ~/.local/share/applications/io.github.hasmolam.cosmic-ext-applet-calendar.desktop
-rm -f ~/.local/share/icons/hicolor/scalable/apps/io.github.hasmolam.cosmic-ext-applet-calendar-symbolic.svg
-killall cosmic-panel
-```
-
----
-
-## Architecture
-
-```
-libcosmic Window Loop
-       │
-       ▼
-  EventCache (LRU, 60s TTL)
-       │
-       ▼
-CompositeBackend
-  ├── LocalIcsBackend (~/.local/share/calendars/*.ics)
-  └── EdsBackend (org.gnome.evolution.dataserver.Calendar over zbus 5 D-Bus)
-```
-
-The applet implements a modular `CalendarBackend` trait. When official COSMIC Accounts support is released in upstream COSMIC, adding support requires only implementing the trait.
+- `EventsChanged()`: Emitted when event data changes (debounced by 150ms).
+- `CollectionsChanged()`: Emitted when collections are added, removed, or visibility changes.
+- `SyncStatusChanged(is_syncing: bool)`: Emitted on sync cycle start and completion.
 
 ---
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE) for details.
+- `calendar-client`: Mozilla Public License 2.0 ([MPL-2.0](https://www.mozilla.org/MPL/2.0/))
+- `calendar-core`: Mozilla Public License 2.0 ([MPL-2.0](https://www.mozilla.org/MPL/2.0/))
+- `cosmic-calendar-sync`: GNU General Public License v3.0 ([GPL-3.0-only](LICENSE))
+- `cosmic-ext-applet-calendar`: GNU General Public License v3.0 ([GPL-3.0-only](LICENSE))
